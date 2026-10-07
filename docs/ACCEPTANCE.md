@@ -18,7 +18,7 @@ pnpm deploy:plugin
 ```
 
 Expected self-test output contains the current plugin version, protocol version
-1, and commit `2c4158f87a1b6a586d0aa5e0338f122cb7887c4f`.
+1, and commit `611132c171f3a821bd2e32f22261135cef6330ac`.
 
 Confirm the widget is enabled:
 
