@@ -10,6 +10,7 @@ async function run(): Promise<void> {
     process.stdout.write(`${JSON.stringify({
       ok: true,
       protocolVersion: 1,
+      nodeVersion: process.version,
       bridgeVersion: packageMetadata.version,
       upstreamCommit: upstreamLock.commit,
     })}\n`);

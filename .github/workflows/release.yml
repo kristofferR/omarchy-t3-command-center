@@ -25,10 +25,10 @@ jobs:
         run: git submodule update --init upstream/t3code
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
-          version: 11.10.0
+          version: latest
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24.13.1
+          node-version: latest
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Match the release tag to project metadata
@@ -36,6 +36,12 @@ jobs:
       - run: pnpm validate:repo
       - run: pnpm typecheck
       - run: pnpm test
+      - name: Read the recorded marketplace builder
+        id: runtime-builder
+        run: echo "node-version=$(node -p "require('./licenses/BUNDLED-LICENSES.json').node.version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ steps.runtime-builder.outputs.node-version }}
       - run: pnpm package
       - run: cd dist && sha256sum -c omarchy-t3code-plugin.tar.gz.sha256
       - name: Create or update the GitHub release

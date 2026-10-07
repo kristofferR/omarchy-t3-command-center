@@ -2,7 +2,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { chmod, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
@@ -23,8 +23,10 @@ const [metadata, lock] = await Promise.all([
   readFile(join(root, "package.json"), "utf8").then(JSON.parse),
   readFile(join(root, "t3-upstream.lock.json"), "utf8").then(JSON.parse),
 ]);
+if (Number(process.versions.node.split(".")[0]) < 26) throw new Error("Marketplace builds require Node 26 or newer.");
+
 const expectedNodeVersion = (await readFile(join(root, ".node-version"), "utf8")).trim();
-if (process.version !== `v${expectedNodeVersion}`) {
+if (expectedNodeVersion !== "latest" && process.version !== `v${expectedNodeVersion}`) {
   throw new Error(`Marketplace payloads must be built with Node ${expectedNodeVersion}; received ${process.version}.`);
 }
 const selfTest = spawnSync(executable, ["--self-test"], {
@@ -36,9 +38,12 @@ if (selfTest.error || selfTest.status !== 0) {
   throw selfTest.error ?? new Error(`Standalone bridge self-test failed with status ${selfTest.status}.`);
 }
 const result = JSON.parse(selfTest.stdout.trim());
+if (result.nodeVersion !== process.version) throw new Error("The packaged bridge was built with a different Node runtime. Rebuild it before bundling.");
 if (result.ok !== true || result.bridgeVersion !== metadata.version || result.upstreamCommit !== lock.commit) {
   throw new Error("The standalone bridge does not match project metadata and the pinned T3 revision.");
 }
+
+await cp(join(root, "dist", "plugin", "licenses"), join(root, "licenses"), { recursive: true });
 
 const hash = createHash("sha256");
 await new Promise((resolveHash, rejectHash) => {

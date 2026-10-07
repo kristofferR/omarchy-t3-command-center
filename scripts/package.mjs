@@ -28,7 +28,11 @@ function run(command, args, options = {}) {
 }
 
 function runPnpm(args) {
-  if (process.env.npm_execpath) return run(process.execPath, [process.env.npm_execpath, ...args]);
+  if (process.env.npm_execpath) {
+    return /\.[cm]?js$/u.test(process.env.npm_execpath)
+      ? run(process.execPath, [process.env.npm_execpath, ...args])
+      : run(process.env.npm_execpath, args);
+  }
   return run("pnpm", args);
 }
 
