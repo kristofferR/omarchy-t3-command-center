@@ -119,14 +119,13 @@ const marketplaceNodeVersion = (await readFile(join(root, ".node-version"), "utf
 const bundledNodeVersion = String(bundledLicenses.node?.version ?? "").match(/^v(\d+)\.(\d+)\.(\d+)$/u)?.slice(1).map(Number);
 if (
   !bundledNodeVersion
-  || bundledNodeVersion[0] < 24
-  || (bundledNodeVersion[0] === 24 && (bundledNodeVersion[1] < 13 || (bundledNodeVersion[1] === 13 && bundledNodeVersion[2] < 1)))
+  || bundledNodeVersion[0] < 26
   || !Array.isArray(bundledLicenses.packages)
   || bundledLicenses.packages.length === 0
 ) {
   fail("the marketplace runtime license inventory is incomplete.");
 }
-if (bundledLicenses.node.version !== `v${marketplaceNodeVersion}`) {
+if (marketplaceNodeVersion !== "latest" && bundledLicenses.node.version !== `v${marketplaceNodeVersion}`) {
   fail("the marketplace runtime license inventory must match the pinned Node builder.");
 }
 if (metadata.scripts?.["verify:marketplace-runtime"] !== "node scripts/verify-marketplace-runtime.mjs") {

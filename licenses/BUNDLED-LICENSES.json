@@ -1,6 +1,6 @@
 {
   "node": {
-    "version": "v24.13.1",
+    "version": "v26.10.0",
     "license": "MIT",
     "file": "NODEJS-LICENSE"
   },
@@ -37,9 +37,9 @@
     },
     {
       "name": "jose",
-      "version": "6.2.2",
+      "version": "6.2.12",
       "license": "MIT",
-      "file": "jose-6.2.2-LICENSE"
+      "file": "jose-6.2.12-LICENSE"
     },
     {
       "name": "msgpackr-extract",
