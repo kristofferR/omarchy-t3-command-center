@@ -1,3 +1,4 @@
+import { upstreamBuild } from "../t3/upstreamBuild.ts";
 import type { AuthStatusDto } from "../protocol/types.ts";
 import { BridgeError } from "../security/redact.ts";
 import type { SecretStore } from "../security/secretStore.ts";
@@ -24,11 +25,10 @@ export const DEFAULT_NATIVE_CLERK_CONFIG: Readonly<NativeClerkConfig> = Object.f
   clerkUrl: "https://clerk.t3.codes",
   jwtTemplate: "t3-relay",
   desktopRedirectUrl: "t3code://app/",
-  // These match the Clerk versions pinned by T3 Code at the compatibility
-  // revision. They are public request metadata, not credentials.
+  // Public request metadata follows the source used for this build.
   clerkApiVersion: "2026-05-12",
-  clerkJsVersion: "6.32.1",
-  electronSdkVersion: "0.0.44",
+  clerkJsVersion: upstreamBuild.clerkJsVersion,
+  electronSdkVersion: upstreamBuild.electronSdkVersion,
 });
 
 interface NativeClerkProviderOptions {

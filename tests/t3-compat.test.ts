@@ -5,6 +5,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import * as Schema from "effect/Schema";
+import { parseDocument } from "yaml";
+import { DEFAULT_NATIVE_CLERK_CONFIG } from "../bridge/src/auth/nativeProvider.ts";
+import { upstreamBuild } from "../bridge/src/t3/upstreamBuild.ts";
 
 import {
   OrchestrationV2Command,
@@ -20,7 +23,7 @@ test("V2 build records the current checkout without a supported-release lock", (
     ["-C", join(root, "upstream", "t3code"), "rev-parse", "HEAD"],
     { encoding: "utf8" },
   ).trim();
-  assert.match(commit, /^[0-9a-f]{40}$/u);
+  assert.equal(upstreamBuild.commit, commit);
 });
 
 test("required lifecycle capabilities decode from current contracts", () => {
@@ -98,18 +101,11 @@ test("native Clerk session path matches the current Relay acceptance boundary", 
   assert.match(provider, /kind: "clerk_session"/u);
 });
 
-test("native Clerk request metadata matches versions pinned by T3", async () => {
-  const lockfile = await readFile(join(root, "upstream", "t3code", "pnpm-lock.yaml"), "utf8");
-  const provider = await readFile(join(root, "bridge", "src", "auth", "nativeProvider.ts"), "utf8");
-  const clerkJs = lockfile.match(/^  '@clerk\/clerk-js': (\S+)$/mu)?.[1];
-  const electron = lockfile.match(/^  '@clerk\/electron': (\S+)$/mu)?.[1];
-  assert(clerkJs);
-  assert(electron);
-  assert.match(provider, new RegExp(`clerkJsVersion: "${clerkJs.replaceAll(".", "\\.")}"`, "u"));
-  assert.match(
-    provider,
-    new RegExp(`electronSdkVersion: "${electron.replaceAll(".", "\\.")}"`, "u"),
-  );
+test("native Clerk request metadata matches the current T3 SDKs", async () => {
+  const catalog = parseDocument(await readFile(join(root, "upstream", "t3code", "pnpm-workspace.yaml"), "utf8"));
+  assert.equal(catalog.errors.length, 0);
+  assert.equal(catalog.getIn(["catalog", "@clerk/clerk-js"]), DEFAULT_NATIVE_CLERK_CONFIG.clerkJsVersion);
+  assert.equal(catalog.getIn(["catalog", "@clerk/electron"]), DEFAULT_NATIVE_CLERK_CONFIG.electronSdkVersion);
 });
 
 test("bridge imports upstream reducers instead of implementing wire projection in QML", async () => {
