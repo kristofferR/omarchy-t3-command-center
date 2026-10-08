@@ -28,7 +28,7 @@ Item {
 
   BorderSurface {
     id: bubble
-    width: root.messageData.role === "user" ? Math.min(parent.width * 0.88, body.implicitWidth + Style.spacing.rowPaddingX * 2) : parent.width
+    width: root.messageData.role === "user" ? Math.min(parent.width * 0.88, Math.max(body.implicitWidth, deliveryLabel.visible ? deliveryLabel.implicitWidth : 0) + Style.spacing.rowPaddingX * 2) : parent.width
     height: body.implicitHeight + deliveryLabel.height + Style.spacing.rowPaddingX * 2
     anchors.right: root.messageData.role === "user" ? parent.right : undefined
     anchors.left: root.messageData.role === "user" ? undefined : parent.left
