@@ -268,7 +268,8 @@ export class T3EnvironmentSession {
   }
 
   private async startThreadSubscription(threadId: string, generation: number): Promise<void> {
-    this.projection.clearThread();
+    // Keep same-thread controls usable until the replacement socket snapshot arrives.
+    if (this.projection.thread?.thread.id !== threadId) this.projection.clearThread();
     if (this.threadFiber !== null) {
       const previous = this.threadFiber;
       this.threadFiber = null;
