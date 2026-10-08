@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { setImmediate } from "node:timers/promises";
+import * as Stream from "effect/Stream";
 import * as Schema from "effect/Schema";
-import { OrchestrationV2ThreadHistoryPage } from "@t3tools/contracts";
+import { ORCHESTRATION_V2_WS_METHODS, OrchestrationV2ThreadBoundedSnapshot, OrchestrationV2ThreadHistoryPage, ThreadId } from "@t3tools/contracts";
 import { T3EnvironmentSession } from "../bridge/src/t3/session.ts";
 import type { ThreadDto } from "../bridge/src/protocol/types.ts";
 import { T3Projection } from "../bridge/src/t3/projection.ts";
@@ -29,7 +31,7 @@ test("history prepends upstream-decoded pages, deduplicates overlap, and keeps l
   const updated = { ...initial, turnItems: initial.turnItems.map((item) => ({ ...item, text: "Live update" })),
     visibleTurnItems: initial.visibleTurnItems.map((row) => ({ ...row, item: { ...row.item, text: "Live update" } })) };
   const older = page("older", 2);
-  assert(history.complete(request, { ...older, items: [...older.items, initial.visibleTurnItems[0]!] }, updated));
+  assert(history.complete(request, { ...older, items: [...older.items, initial.visibleTurnItems[0]!] }, updated, 1));
   assert.deepEqual(history.rows(updated).map((row) => row.item.id), ["older-0", "older-1", "recent-0", "recent-1"]);
   assert.equal(history.rows(updated).at(-1)?.item.type, "assistant_message");
   assert.equal((history.rows(updated).at(-1)!.item as { text: string }).text, "Live update");
@@ -43,12 +45,12 @@ test("history cursor survives live events but stale completions and failures can
   adapter.applyThread({ kind: "snapshot", snapshotSequence: 1, projection: projection(), historyCursor: "first", hasMoreHistory: true });
   const request = adapter.history.begin(adapter.thread!)!;
   adapter.applyThread({ kind: "snapshot", snapshotSequence: 5, projection: projection(1, "replacement"), historyCursor: "second", hasMoreHistory: true });
-  assert.equal(adapter.history.complete(request, page("stale"), adapter.thread!), false);
+  assert.equal(adapter.history.complete(request, page("stale"), adapter.thread!, adapter.currentThreadSequence), false);
   assert.equal(adapter.history.fail(request, "Stale failure"), false);
   assert.equal(adapter.threadDto("environment-1").history.error, null);
   assert.equal(adapter.history.begin(adapter.thread!)?.cursor, "second");
   adapter.clearThread();
-  assert.equal(adapter.history.complete(request, page("stale"), projection()), false);
+  assert.equal(adapter.history.complete(request, page("stale"), projection(), -1), false);
 });
 
 test("history errors retain the cursor for retry, and jump to latest discards in-flight pages", () => {
@@ -62,7 +64,7 @@ test("history errors retain the cursor for retry, and jump to latest discards in
   const retry = history.begin(initial)!;
   assert.equal(retry.cursor, "retry-cursor");
   history.latest();
-  assert.equal(history.complete(retry, page("stale"), initial), false);
+  assert.equal(history.complete(retry, page("stale"), initial, 1), false);
   assert.equal(history.state(initial).browsing, false);
   assert.deepEqual(history.rows(initial), initial.visibleTurnItems);
 });
@@ -80,7 +82,7 @@ test("retained history pages locally and remote paging continues within memory a
   for (let index = 0; index < 40; index++) {
     const request = history.begin(initial)!;
     assert.notEqual(request.cursor, null);
-    assert(history.complete(request, page(`page-${index}`, 16, `cursor-${index}`), initial));
+    assert(history.complete(request, page(`page-${index}`, 16, `cursor-${index}`), initial, 1));
     assert(history.rows(initial).length <= 64);
   }
   assert.equal(history.rows(initial)[0]?.item.id, "page-39-0");
@@ -96,7 +98,7 @@ test("history does not resurrect a row hidden by a live update while its page wa
   const hidden = assistantItem("Hidden", "hidden");
   const current = { ...initial, turnItems: [...initial.turnItems, hidden] };
   const older = page("older", 1);
-  history.complete(request, { ...older, items: [projectedItem(hidden), ...older.items] }, current);
+  history.complete(request, { ...older, items: [projectedItem(hidden), ...older.items] }, current, 1);
   assert(!history.rows(current).some((row) => row.item.id === hidden.id));
 });
 
@@ -145,4 +147,85 @@ test("unsupported history loading returns a retryable UI state without querying 
   await assert.rejects(session.loadEarlier(v2Projection.thread.id), /does not support/);
   assert.equal(session.projection.history.loading, false);
   assert.equal(session.projection.history.state(session.projection.thread!).hasMore, true);
+});
+
+test("history pages ahead of the live sequence retain their cursor for retry after catch-up", async () => {
+  const snapshots: ThreadDto[] = [];
+  const cursors: string[] = [];
+  const ahead = { ...page("older", 1, "next-cursor"), snapshotSequence: 3 };
+  const session = new T3EnvironmentSession({ onInbox() {}, onThread(dto) { snapshots.push(dto); },
+    onMessageDelta() {}, onMessageCompleted() {}, onApproval() {}, onInput() {}, onClosed() {}, onError() {} },
+    async (_prepared, _threadId, cursor) => { cursors.push(cursor); return ahead; });
+  Object.assign(session, { environmentId: "environment-1", prepared: {} });
+  session.projection.config = config;
+  session.projection.shell = v2ShellSnapshot;
+  session.projection.applyThread({ kind: "snapshot", snapshotSequence: 1, projection: projection(), historyCursor: "cursor", hasMoreHistory: true });
+
+  await assert.rejects(session.loadEarlier(v2Projection.thread.id), { code: "HISTORY_NOT_SYNCHRONIZED", retryable: true });
+  assert.equal(snapshots.at(-1)?.history.loading, false);
+  assert.match(snapshots.at(-1)?.history.error ?? "", /still synchronizing/);
+  assert(!session.projection.history.rows(session.projection.thread!).some((row) => row.item.id === "older-0"));
+
+  // Unknown events still advance the stream watermark without resetting history.
+  session.projection.applyThread({ kind: "unknown-event", sequence: 3, eventType: "future.event" });
+  assert.deepEqual(await session.loadEarlier(v2Projection.thread.id), { loaded: true });
+  assert.deepEqual(cursors, ["cursor", "cursor"]);
+  assert.equal(snapshots.at(-1)?.history.error, null);
+  assert.equal(session.projection.history.rows(session.projection.thread!)[0]?.item.id, "older-0");
+
+  // Pages behind the stream remain compatible and use the upstream live-row merge.
+  session.projection.applyThread({ kind: "unknown-event", sequence: 4, eventType: "future.event" });
+  assert.deepEqual(await session.loadEarlier(v2Projection.thread.id), { loaded: true });
+  assert.equal(cursors.at(-1), "next-cursor");
+});
+
+test("a stale jump-to-latest refresh cannot let shell updates duplicate a newer thread subscription", async () => {
+  const refreshing = Promise.withResolvers<OrchestrationV2ThreadBoundedSnapshot>();
+  const opening = Promise.withResolvers<OrchestrationV2ThreadBoundedSnapshot>();
+  const inbox = Promise.withResolvers<void>();
+  const snapshotRequests: string[] = [];
+  const streamRequests: string[] = [];
+  const nextId = ThreadId.make("next-thread");
+  const session = new T3EnvironmentSession({ onInbox() { inbox.resolve(); }, onThread() {},
+    onMessageDelta() {}, onMessageCompleted() {}, onApproval() {}, onInput() {}, onClosed() {}, onError() {} },
+    undefined, async (_prepared, threadId) => {
+      snapshotRequests.push(threadId);
+      return threadId === nextId ? opening.promise : refreshing.promise;
+    });
+  Object.assign(session, { environmentId: "environment-1", prepared: {}, session: { client: {
+    [ORCHESTRATION_V2_WS_METHODS.subscribeShell]() {
+      return Stream.concat(Stream.make({ kind: "snapshot" as const, snapshot: v2ShellSnapshot }), Stream.never);
+    },
+    [ORCHESTRATION_V2_WS_METHODS.subscribeThread]({ threadId }: { threadId: string }) {
+      streamRequests.push(threadId);
+      return Stream.never;
+    },
+  } } });
+  session.projection.config = config;
+  session.projection.shell = v2ShellSnapshot;
+  session.projection.applyThread({ kind: "snapshot", snapshotSequence: 1, projection: projection(), historyCursor: "cursor", hasMoreHistory: true });
+  const bounded = (threadId: ThreadId) => Schema.decodeUnknownSync(OrchestrationV2ThreadBoundedSnapshot)({
+    snapshotSequence: 1, projection: { ...projection(), thread: { ...v2Projection.thread, id: threadId } },
+    historyCursor: "cursor", hasMoreHistory: true, latestLocalTurnOrdinal: null,
+  });
+
+  try {
+    const refresh = session.showLatest(v2Projection.thread.id);
+    const open = session.openThread(nextId);
+    refreshing.resolve(bounded(v2Projection.thread.id));
+    await refresh;
+    // Deliver a shell update while the newer bounded snapshot is still pending.
+    (session as unknown as { startShellStream(): void }).startShellStream();
+    await inbox.promise;
+    await setImmediate();
+    assert.deepEqual(snapshotRequests, [v2Projection.thread.id, nextId]);
+    assert.deepEqual(streamRequests, []);
+
+    opening.resolve(bounded(nextId));
+    await open;
+    assert.deepEqual(streamRequests, [nextId]);
+    assert.equal(session.projection.thread?.thread.id, nextId);
+  } finally {
+    await session.close();
+  }
 });

@@ -78,8 +78,12 @@ export class T3ThreadHistory {
     return { epoch: this.epoch, cursor: this.cursor };
   }
 
-  complete(request: { epoch: number; cursor: string | null }, page: OrchestrationV2ThreadHistoryPage, projection: OrchestrationV2ThreadProjection): boolean {
+  complete(request: { epoch: number; cursor: string | null }, page: OrchestrationV2ThreadHistoryPage, projection: OrchestrationV2ThreadProjection, threadSequence: number): boolean {
     if (request.epoch !== this.epoch || request.cursor !== this.cursor || !this.loading) return false;
+    // Never install text whose corresponding live events may still be replayed.
+    if (page.snapshotSequence > threadSequence) {
+      throw new BridgeError("HISTORY_NOT_SYNCHRONIZED", "Live messages are still synchronizing. Try loading older messages again.", true);
+    }
     const rows = conversationRows(page.items);
     if (rows.length > MAX_STORED_THREAD_MESSAGES) {
       throw new BridgeError("HISTORY_PAGE_TOO_LARGE", "This history page exceeds the mini client's message limit.");

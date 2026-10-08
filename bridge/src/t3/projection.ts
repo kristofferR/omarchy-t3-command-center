@@ -199,6 +199,8 @@ export class T3Projection {
   private partialTimeline = false;
   private latestLocalTurnOrdinal: number | null = null;
 
+  get currentThreadSequence(): number { return this.threadSequence; }
+
   reset(): void {
     this.clearThread();
     this.shell = null;

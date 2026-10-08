@@ -126,7 +126,7 @@ export class T3EnvironmentSession {
   private failureReported = false;
   private environmentId: string | null = null;
   private requestedThreadId: string | null = null;
-  private threadSubscribePending = false;
+  private threadSubscribePending: number | null = null;
   private prepared: PreparedConnection | null = null;
   private threadGeneration = 0;
 
@@ -226,10 +226,9 @@ export class T3EnvironmentSession {
               if (
                 this.requestedThreadId !== null &&
                 this.threadFiber === null &&
-                !this.threadSubscribePending
+                this.threadSubscribePending === null
               ) {
                 const requested = this.requestedThreadId;
-                this.threadSubscribePending = true;
                 void this.subscribeThread(requested)
                   .catch((error) =>
                     this.callbacks.onError(
@@ -237,10 +236,7 @@ export class T3EnvironmentSession {
                         ? error
                         : new BridgeError("THREAD_STREAM_FAILED", redactText(error), true),
                     ),
-                  )
-                  .finally(() => {
-                    this.threadSubscribePending = false;
-                  });
+                  );
               }
             }
           }),
@@ -261,13 +257,19 @@ export class T3EnvironmentSession {
 
   async openThread(threadId: string): Promise<void> {
     this.requestedThreadId = threadId;
-    this.threadSubscribePending = true;
-    try { await this.subscribeThread(threadId); }
-    finally { this.threadSubscribePending = false; }
+    await this.subscribeThread(threadId);
   }
 
   private async subscribeThread(threadId: string): Promise<void> {
     const generation = ++this.threadGeneration;
+    this.threadSubscribePending = generation;
+    try { await this.startThreadSubscription(threadId, generation); }
+    finally {
+      if (this.threadSubscribePending === generation) this.threadSubscribePending = null;
+    }
+  }
+
+  private async startThreadSubscription(threadId: string, generation: number): Promise<void> {
     this.projection.clearThread();
     if (this.threadFiber !== null) {
       const previous = this.threadFiber;
@@ -364,6 +366,7 @@ export class T3EnvironmentSession {
 
   async closeThread(): Promise<void> {
     ++this.threadGeneration;
+    this.threadSubscribePending = null;
     this.projection.clearThread();
     this.requestedThreadId = null;
     const threadFiber = this.threadFiber;
@@ -388,7 +391,7 @@ export class T3EnvironmentSession {
       const page = await this.loadHistoryPage(this.prepared, threadId, request.cursor);
       const current = this.projection.thread;
       if (!current || current.thread.id !== threadId) return { loaded: false };
-      const loaded = history.complete(request, page, current);
+      const loaded = history.complete(request, page, current, this.projection.currentThreadSequence);
       if (loaded && this.environmentId !== null) this.callbacks.onThread(this.projection.threadDto(this.environmentId));
       return { loaded };
     } catch (error) {
@@ -408,9 +411,7 @@ export class T3EnvironmentSession {
     this.projection.history.latest();
     this.callbacks.onThread(this.projection.threadDto(this.environmentId));
     // Refresh the window/cursor after long browsing sessions, then catch up from its sequence.
-    this.threadSubscribePending = true;
-    try { await this.subscribeThread(threadId); }
-    finally { this.threadSubscribePending = false; }
+    await this.subscribeThread(threadId);
     return {};
   }
 
@@ -471,6 +472,7 @@ export class T3EnvironmentSession {
 
   private async teardown(resetThreadSelection: boolean): Promise<void> {
     ++this.threadGeneration;
+    this.threadSubscribePending = null;
     this.projection.clearThread();
     this.expectedClose = true;
     const threadFiber = this.threadFiber;
@@ -479,7 +481,6 @@ export class T3EnvironmentSession {
     this.shellFiber = null;
     if (threadFiber !== null) await Effect.runPromise(Fiber.interrupt(threadFiber));
     if (shellFiber !== null) await Effect.runPromise(Fiber.interrupt(shellFiber));
-    this.threadSubscribePending = false;
     if (this.scope !== null) await Effect.runPromise(Scope.close(this.scope, Exit.void));
     this.scope = null;
     this.session = null;
