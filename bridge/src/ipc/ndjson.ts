@@ -51,7 +51,7 @@ export class NdjsonChannel {
           const pending = this.handler.handle(request);
           // Start history in order, but let live controls proceed during the fetch.
           // The session invalidates late pages when the thread or connection changes.
-          if (request.type === "thread.history.load") {
+          if (request.type === "thread.history.load" || request.type === "thread.history.latest") {
             void pending.catch((error) => this.reportHandlerError(error));
             return;
           }
