@@ -31,11 +31,9 @@ if (process.platform !== "linux" || process.arch !== "x64") {
 
 if (Number(process.versions.node.split(".")[0]) < 26) throw new Error("Marketplace builds require Node 26 or newer.");
 
-const expectedNodeVersion = (await readFile(join(root, ".node-version"), "utf8")).trim();
-if (expectedNodeVersion !== "latest" && process.version !== `v${expectedNodeVersion}`) {
-  throw new Error(
-    `Marketplace runtime verification requires Node ${expectedNodeVersion}; received ${process.version}.`,
-  );
+const buildRecord = JSON.parse(await readFile(join(root, "lib", "runtime-build.json"), "utf8"));
+if (process.version !== buildRecord.nodeVersion) {
+  throw new Error("Use the recorded Node builder to reproduce this payload, or rebuild and bundle with current Node.");
 }
 
 try {
@@ -66,7 +64,7 @@ try {
   if (comparison.status !== 0) {
     throw new Error(
       "The tracked marketplace payload does not byte-match the fresh source build. "
-      + "Run pnpm package and pnpm bundle:marketplace with the pinned builder, then review the payload change.",
+      + "Run pnpm package and pnpm bundle:marketplace with the current builder, then review the payload change.",
     );
   }
 
@@ -78,6 +76,25 @@ try {
   const checksumMatch = checksumContents.match(/^([0-9a-f]{64})  t3-mini-bridge\n$/u);
   if (!checksumMatch || checksumMatch[1] !== freshDigest || decompressedDigest !== freshDigest) {
     throw new Error("The tracked marketplace checksum does not match the byte-identical source build.");
+  }
+
+  const freshRecord = JSON.parse(await readFile(join(root, "dist", "plugin", "lib", "runtime-build.json"), "utf8"));
+  for (const key of ["commit", "nodeVersion", "clerkJsVersion", "electronSdkVersion"]) {
+    if (buildRecord[key] !== freshRecord[key]) throw new Error("The runtime build record does not match the reproduced payload.");
+  }
+  const inventoryText = await readFile(join(root, "dist", "plugin", "licenses", "BUNDLED-LICENSES.json"), "utf8");
+  if (inventoryText !== await readFile(join(root, "licenses", "BUNDLED-LICENSES.json"), "utf8")) {
+    throw new Error("The tracked license inventory does not match the reproduced payload.");
+  }
+  const inventory = JSON.parse(inventoryText);
+  const licenseFiles = ["NODEJS-LICENSE", "T3-CODE-LICENSE", "OMARCHY-T3CODE-LICENSE", "BUNDLED-LEGAL-COMMENTS.txt", ...inventory.packages.map((entry) => entry.file)];
+  for (const file of licenseFiles) {
+    if (typeof file !== "string" || !/^[0-9A-Za-z@._-]+$/u.test(file)) throw new Error("Unsafe runtime license filename.");
+    const [fresh, tracked] = await Promise.all([
+      readFile(join(root, "dist", "plugin", "licenses", file)),
+      readFile(join(root, "licenses", file)),
+    ]);
+    if (!fresh.equals(tracked)) throw new Error("The tracked license does not match the reproduced payload: " + file);
   }
 
   process.stdout.write(

@@ -7,18 +7,17 @@ client open so cross-client state can be observed.
 ## Preflight
 
 ```bash
-git submodule update --init upstream/t3code
-pnpm install --frozen-lockfile
+pnpm sync:t3
+pnpm install
 pnpm check
 pnpm package
-pnpm verify:marketplace-runtime
+pnpm bundle:marketplace
 dist/plugin/lib/t3-mini-bridge --self-test
-scripts/check-t3-nightly
 pnpm deploy:plugin
 ```
 
 Expected self-test output contains the current plugin version, protocol version
-1, and commit `611132c171f3a821bd2e32f22261135cef6330ac`.
+1, and the commit printed by `git -C upstream/t3code rev-parse HEAD`.
 
 Confirm the widget is enabled:
 

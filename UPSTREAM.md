@@ -1,11 +1,14 @@
 # T3 orchestration V2 integration
 
-This integration uses a snapshot of T3 Code's main branch. The build record is
-`t3-upstream.lock.json`, paired with the `upstream/t3code` submodule.
+This integration follows [T3 Code main](https://github.com/pingdotgg/t3code).
+Run `pnpm sync:t3` and `pnpm install` to refresh the ignored source checkout.
+Effect versions and patches follow that source catalog; Clerk SDK metadata is
+read at build time. No supported-release lock or submodule pin is required.
 
-- Source: `main`
-- Commit: `611132c171f3a821bd2e32f22261135cef6330ac`
-- Commit date: `2026-10-07T04:33:44-07:00`
+`lib/runtime-build.json` identifies the source and Node builder of the shipped
+marketplace payload. `--build-record` reproduces that historical artifact only.
+CI checks current main separately, so the artifact record does not constrain
+which source revisions can be built.
 
 The bridge consumes upstream contracts, Effect RPC, relay authorization, DPoP,
 and the V2 shell and thread projection reducers. QML receives the plugin's

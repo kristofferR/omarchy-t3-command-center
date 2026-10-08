@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { upstreamBuild } from "../bridge/src/t3/upstreamBuild.ts";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { access, chmod, copyFile, cp, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
@@ -79,10 +80,9 @@ async function buildStandalone() {
   await chmod(executablePath, 0o755);
   const selfTest = run(executablePath, ["--self-test"], { capture: true, timeout: 30_000 });
   const result = JSON.parse(selfTest.stdout.trim());
-  const lock = JSON.parse(await readFile(join(root, "t3-upstream.lock.json"), "utf8"));
   const metadata = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-  if (result.ok !== true || result.bridgeVersion !== metadata.version || result.upstreamCommit !== lock.commit) {
-    throw new Error("The standalone bridge self-test did not match project metadata and the pinned T3 revision.");
+  if (result.ok !== true || result.bridgeVersion !== metadata.version || result.upstreamCommit !== upstreamBuild.commit || result.clerkJsVersion !== upstreamBuild.clerkJsVersion || result.electronSdkVersion !== upstreamBuild.electronSdkVersion) {
+    throw new Error("The standalone bridge self-test did not match project metadata and the T3 source checkout.");
   }
   return executablePath;
 }
@@ -172,6 +172,7 @@ await mkdir(join(packagedPlugin, "lib"), { recursive: true });
 await mkdir(join(packagedPlugin, "licenses"), { recursive: true });
 await mkdir(join(packagedPlugin, "docs"), { recursive: true });
 await copyFile(executablePath, join(packagedPlugin, "lib", "t3-mini-bridge"));
+await writeFile(join(packagedPlugin, "lib", "runtime-build.json"), `${JSON.stringify({ ...upstreamBuild, nodeVersion: process.version }, null, 2)}\n`);
 await copyFile(join(bridgeDist, "t3-mini-bridge.mjs"), join(packagedPlugin, "lib", "t3-mini-bridge.mjs"));
 await copyFile(join(root, "LICENSE"), join(packagedPlugin, "LICENSE"));
 await copyFile(join(root, "LICENSE"), join(packagedPlugin, "licenses", "OMARCHY-T3CODE-LICENSE"));

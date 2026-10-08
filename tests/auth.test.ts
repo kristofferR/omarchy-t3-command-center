@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { forwardNativeCallback } from "../bridge/src/auth/nativeCallback.ts";
-import { NativeClerkProvider } from "../bridge/src/auth/nativeProvider.ts";
+import { DEFAULT_NATIVE_CLERK_CONFIG, NativeClerkProvider } from "../bridge/src/auth/nativeProvider.ts";
 import {
   activateT3ProtocolHandler,
   clearT3ProtocolDefault,
@@ -155,9 +155,9 @@ test("native Clerk browser flow returns a relay-audienced session credential", a
   assert.equal(callback.url.searchParams.get("rotating_token_nonce"), "test-nonce");
   for (const entry of requests) {
     assert.equal(entry.url.searchParams.get("__clerk_api_version"), "2026-05-12");
-    assert.equal(entry.url.searchParams.get("_clerk_js_version"), "6.32.1");
+    assert.equal(entry.url.searchParams.get("_clerk_js_version"), DEFAULT_NATIVE_CLERK_CONFIG.clerkJsVersion);
     assert.equal(entry.url.searchParams.get("_is_native"), "1");
-    assert.equal(entry.url.searchParams.get("_electron_sdk_version"), "0.0.44");
+    assert.equal(entry.url.searchParams.get("_electron_sdk_version"), DEFAULT_NATIVE_CLERK_CONFIG.electronSdkVersion);
   }
 
   const firstCredential = await provider.relayCredential();

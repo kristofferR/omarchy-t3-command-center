@@ -35,8 +35,7 @@
     "verify:marketplace-runtime": "node scripts/verify-marketplace-runtime.mjs",
     "deploy:plugin": "node scripts/deploy-dev-plugin.mjs",
     "remove:plugin": "scripts/remove-package",
-    "check:t3-nightly": "node scripts/check-t3-nightly.mjs",
-    "update:t3-nightly": "node scripts/update-t3-nightly.mjs"
+    "sync:t3": "node scripts/sync-t3.mjs"
   },
   "devDependencies": {
     "@t3tools/client-runtime": "workspace:*",
@@ -48,6 +47,7 @@
     "postject": "^1.0.0-alpha.6",
     "tsx": "^4.23.15",
     "typescript": "catalog:",
-    "@t3tools/contracts": "workspace:*"
+    "@t3tools/contracts": "workspace:*",
+    "yaml": "catalog:"
   }
 }

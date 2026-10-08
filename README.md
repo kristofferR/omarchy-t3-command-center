@@ -96,3 +96,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md), [ARCHITECTURE.md](ARCHITECTURE.md),
 
 MIT. Third-party notices and the Node runtime inventory live in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [licenses/](licenses/).
+
+### Source updates
+
+Development builds follow T3 main: run `pnpm sync:t3`, `pnpm install`, and
+`pnpm check`. The packaged executable records its source and runtime in
+`lib/runtime-build.json`; this record is for artifact reproduction.
