@@ -47,6 +47,7 @@
     "jose": "catalog:",
     "postject": "^1.0.0-alpha.6",
     "tsx": "^4.23.15",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "@t3tools/contracts": "workspace:*"
   }
 }
