@@ -230,6 +230,12 @@ Item {
     request("thread.send", payload, callback)
   }
   function interrupt(threadId, environmentId) { request("thread.interrupt", { environmentId: environmentId, threadId: threadId }) }
+  function loadEarlier(threadId, environmentId, callback) {
+    request("thread.history.load", { environmentId: environmentId, threadId: threadId }, callback)
+  }
+  function showLatest(threadId, environmentId, callback) {
+    request("thread.history.latest", { environmentId: environmentId, threadId: threadId }, callback)
+  }
   function resumeQueue(threadId, environmentId, callback) {
     request("thread.queue.resume", { environmentId: environmentId, threadId: threadId }, callback)
   }

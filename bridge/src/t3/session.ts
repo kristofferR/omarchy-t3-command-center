@@ -8,6 +8,8 @@ import {
   WS_METHODS,
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2ThreadProjection,
+  type OrchestrationV2ThreadHistoryPage,
+  type OrchestrationV2ThreadBoundedSnapshot,
   type ServerConfig,
 } from "@t3tools/contracts";
 import {
@@ -32,6 +34,8 @@ import { boundMessageDelta } from "./bounds.ts";
 import { T3Projection } from "./projection.ts";
 
 type RuntimeFiber = Fiber.Fiber<unknown, unknown>;
+type HistoryPageLoader = (prepared: PreparedConnection, threadId: string, cursor: string) => Promise<OrchestrationV2ThreadHistoryPage>;
+type HistorySnapshotLoader = (prepared: PreparedConnection, threadId: string) => Promise<OrchestrationV2ThreadBoundedSnapshot>;
 
 export interface SessionCallbacks {
   onInbox(inbox: InboxDto): void;
@@ -123,8 +127,10 @@ export class T3EnvironmentSession {
   private environmentId: string | null = null;
   private requestedThreadId: string | null = null;
   private threadSubscribePending = false;
+  private prepared: PreparedConnection | null = null;
+  private threadGeneration = 0;
 
-  constructor(private readonly callbacks: SessionCallbacks) {}
+  constructor(private readonly callbacks: SessionCallbacks, private readonly loadHistoryPage?: HistoryPageLoader, private readonly loadHistorySnapshot?: HistorySnapshotLoader) {}
 
   private reportUnexpectedClose(code: string, detail: string): void {
     if (this.expectedClose || this.failureReported) return;
@@ -167,6 +173,7 @@ export class T3EnvironmentSession {
     this.expectedClose = false;
     this.failureReported = false;
     this.environmentId = connection.environmentId;
+    this.prepared = connection;
     this.projection.reset();
 
     const factoryLayer = RpcSessionUpstream.layer({}).pipe(
@@ -254,19 +261,41 @@ export class T3EnvironmentSession {
 
   async openThread(threadId: string): Promise<void> {
     this.requestedThreadId = threadId;
-    await this.subscribeThread(threadId);
+    this.threadSubscribePending = true;
+    try { await this.subscribeThread(threadId); }
+    finally { this.threadSubscribePending = false; }
   }
 
   private async subscribeThread(threadId: string): Promise<void> {
+    const generation = ++this.threadGeneration;
+    this.projection.clearThread();
     if (this.threadFiber !== null) {
       const previous = this.threadFiber;
       this.threadFiber = null;
       await Effect.runPromise(Fiber.interrupt(previous));
     }
-    this.projection.thread = null;
     const client = this.requireClient();
+    let afterSequence: number | undefined;
+    const prepared = this.prepared;
+    if (this.projection.config?.threadSnapshotPagination === true && prepared && this.loadHistorySnapshot) {
+      try {
+        const snapshot = await this.loadHistorySnapshot(prepared, threadId);
+        if (generation !== this.threadGeneration) return;
+        this.projection.applyThread({
+          kind: "snapshot", snapshotSequence: snapshot.snapshotSequence,
+          projection: snapshot.projection, historyCursor: snapshot.historyCursor,
+          hasMoreHistory: snapshot.hasMoreHistory, latestLocalTurnOrdinal: snapshot.latestLocalTurnOrdinal,
+        });
+        afterSequence = snapshot.snapshotSequence;
+        if (this.environmentId !== null) this.callbacks.onThread(this.projection.threadDto(this.environmentId));
+      } catch {
+        // Older servers and transient HTTP failures can still open over the socket.
+      }
+    }
+    if (generation !== this.threadGeneration) return;
     const stream = client[ORCHESTRATION_V2_WS_METHODS.subscribeThread]({
       threadId: ThreadId.make(threadId),
+      ...(afterSequence === undefined ? {} : { afterSequence }),
       ...(this.projection.config?.threadResumeCompletionMarker === true
         ? { requestCompletionMarker: true as const }
         : {}),
@@ -334,11 +363,55 @@ export class T3EnvironmentSession {
   }
 
   async closeThread(): Promise<void> {
+    ++this.threadGeneration;
+    this.projection.clearThread();
     this.requestedThreadId = null;
     const threadFiber = this.threadFiber;
     this.threadFiber = null;
     if (threadFiber !== null) await Effect.runPromise(Fiber.interrupt(threadFiber));
-    this.projection.thread = null;
+  }
+
+  async loadEarlier(threadId: string): Promise<{ loaded: boolean }> {
+    const projection = this.projection.thread;
+    if (!projection || projection.thread.id !== threadId || this.environmentId === null) {
+      throw new BridgeError("THREAD_NOT_READY", "Open this thread and wait for it to synchronize.", true);
+    }
+    const history = this.projection.history;
+    const request = history.begin(projection);
+    this.callbacks.onThread(this.projection.threadDto(this.environmentId));
+    if (request === null) return { loaded: false };
+    if (request.cursor === null) return { loaded: true };
+    try {
+      if (this.projection.config?.threadSnapshotPagination !== true || !this.prepared || !this.loadHistoryPage) {
+        throw new BridgeError("CAPABILITY_UNSUPPORTED", "This environment does not support loading older history.");
+      }
+      const page = await this.loadHistoryPage(this.prepared, threadId, request.cursor);
+      const current = this.projection.thread;
+      if (!current || current.thread.id !== threadId) return { loaded: false };
+      const loaded = history.complete(request, page, current);
+      if (loaded && this.environmentId !== null) this.callbacks.onThread(this.projection.threadDto(this.environmentId));
+      return { loaded };
+    } catch (error) {
+      const failure = error instanceof BridgeError ? error : new BridgeError("HISTORY_LOAD_FAILED", "Older messages could not be loaded. Try again.", true);
+      if (!history.fail(request, failure.message)) return { loaded: false };
+      if (this.environmentId !== null && this.projection.thread?.thread.id === threadId) {
+        this.callbacks.onThread(this.projection.threadDto(this.environmentId));
+      }
+      throw failure;
+    }
+  }
+
+  async showLatest(threadId: string): Promise<Record<string, never>> {
+    if (this.projection.thread?.thread.id !== threadId || this.environmentId === null) {
+      throw new BridgeError("THREAD_NOT_READY", "Open this thread and wait for it to synchronize.", true);
+    }
+    this.projection.history.latest();
+    this.callbacks.onThread(this.projection.threadDto(this.environmentId));
+    // Refresh the window/cursor after long browsing sessions, then catch up from its sequence.
+    this.threadSubscribePending = true;
+    try { await this.subscribeThread(threadId); }
+    finally { this.threadSubscribePending = false; }
+    return {};
   }
 
   async dispatch(value: unknown): Promise<{ sequence: number }> {
@@ -397,6 +470,8 @@ export class T3EnvironmentSession {
   }
 
   private async teardown(resetThreadSelection: boolean): Promise<void> {
+    ++this.threadGeneration;
+    this.projection.clearThread();
     this.expectedClose = true;
     const threadFiber = this.threadFiber;
     const shellFiber = this.shellFiber;
@@ -409,6 +484,7 @@ export class T3EnvironmentSession {
     this.scope = null;
     this.session = null;
     this.environmentId = null;
+    this.prepared = null;
     this.projection.reset();
     if (resetThreadSelection) this.requestedThreadId = null;
   }

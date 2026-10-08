@@ -13,6 +13,8 @@ const REQUEST_TYPES = new Set<RequestType>([
   "attachment.discard",
   "thread.open",
   "thread.close",
+  "thread.history.load",
+  "thread.history.latest",
   "thread.create",
   "thread.send",
   "thread.interrupt",
@@ -128,6 +130,8 @@ function validatePayload(type: RequestType, payload: Record<string, unknown>): v
       requireEnvironmentId(payload);
       return;
     case "thread.open":
+    case "thread.history.load":
+    case "thread.history.latest":
     case "thread.interrupt":
     case "thread.queue.resume":
     case "thread.settle":
