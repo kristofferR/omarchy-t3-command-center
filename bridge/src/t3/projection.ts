@@ -23,6 +23,7 @@ import {
   threadRuntimeIsActive,
 } from "../../../upstream/t3code/packages/client-runtime/src/state/models.ts";
 import { deriveThreadCheckpointSummaries } from "../../../upstream/t3code/packages/client-runtime/src/state/threadCheckpoints.ts";
+import { deriveThreadQueueWorkflowState } from "../../../upstream/t3code/packages/client-runtime/src/state/threadWorkflows.ts";
 import type {
   CapabilitiesDto,
   InboxDto,
@@ -33,7 +34,7 @@ import type {
   ThreadSummaryDto,
 } from "../protocol/types.ts";
 import { BridgeError } from "../security/redact.ts";
-import { boundShellSnapshot, boundShellStreamItem, boundThread } from "./bounds.ts";
+import { boundShellSnapshot, boundShellStreamItem, boundThread, MAX_IPC_MESSAGE_TEXT_CHARS, MAX_IPC_QUEUE_MESSAGES } from "./bounds.ts";
 import { derivePendingApprovals, derivePendingInputs } from "./pending.ts";
 
 function capabilities(config: ServerConfig): CapabilitiesDto {
@@ -322,6 +323,9 @@ export class T3Projection {
       shellFromDetail(projection);
     const presented = presentThreadShell(EnvironmentId.make(environmentId), shell);
     const phase = phaseOf(presented);
+    const queue = deriveThreadQueueWorkflowState(projection);
+    const queuedMessageIds = new Set(queue.queuedRuns.map((entry) => entry.messageId));
+    const availableMessageIds = new Set(projection.messages.map((message) => message.id));
     const project = snapshot.projects.find((project) => project.id === shell.projectId);
     return {
       environmentId,
@@ -348,6 +352,17 @@ export class T3Projection {
       lifecycle: lifecycleOf(shell, config),
       sessionError: presented.runtime?.lastError ?? null,
       capabilities: capabilities(config),
+      queue: {
+        held: queue.isHeld,
+        canManage: config.environment.orchestrationProtocolVersion === 2,
+        total: queue.queuedRuns.length,
+        messages: queue.queuedRuns.slice(0, MAX_IPC_QUEUE_MESSAGES).map((entry) => ({
+          runId: entry.run.id,
+          text: entry.text.slice(0, MAX_IPC_MESSAGE_TEXT_CHARS),
+          editable: availableMessageIds.has(entry.messageId) && entry.text.length <= MAX_IPC_MESSAGE_TEXT_CHARS,
+          attachmentCount: entry.attachments.length,
+        })),
+      },
       messages: projection.visibleTurnItems.flatMap((row) => {
         const item = row.item;
         if (item.type !== "user_message" && item.type !== "assistant_message") return [];
@@ -365,6 +380,11 @@ export class T3Projection {
               mimeType: attachment.mimeType,
               sizeBytes: attachment.sizeBytes,
             })),
+            ...(item.type === "user_message" && queuedMessageIds.has(item.messageId)
+              ? { delivery: "queued" as const }
+              : item.type === "user_message" && ["steer", "promoted_queued_to_steer"].includes(item.inputIntent)
+                ? { delivery: "steer" as const }
+                : {}),
           },
         ];
       }),

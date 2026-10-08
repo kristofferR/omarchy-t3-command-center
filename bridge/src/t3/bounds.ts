@@ -34,6 +34,7 @@ export const MAX_MESSAGE_DELTA_CHARS = 8_192;
 export const MAX_INBOX_THREADS_PER_SECTION = 200;
 export const MAX_INBOX_SUMMARY_TITLE_CHARS = 256;
 export const MAX_IPC_THREAD_MESSAGES = 64;
+export const MAX_IPC_QUEUE_MESSAGES = 16;
 export const MAX_IPC_MESSAGE_TEXT_CHARS = 4_096;
 export const MAX_IPC_JSON_BYTES = 512 * 1024;
 export const MAX_IPC_LINE_CHARS = MAX_IPC_JSON_BYTES;
@@ -187,6 +188,14 @@ export function boundThreadDto(thread: ThreadDto): ThreadDto {
     branch: boundOptionalText(thread.branch),
     environmentLabel: truncateText(thread.environmentLabel, MAX_FIELD_CHARS),
     sessionError: boundOptionalText(thread.sessionError, MAX_MESSAGE_TEXT_CHARS),
+    queue: {
+      ...thread.queue,
+      messages: thread.queue.messages.slice(0, MAX_IPC_QUEUE_MESSAGES).map((message) => ({
+        ...message,
+        text: truncateText(message.text, MAX_IPC_MESSAGE_TEXT_CHARS),
+        editable: message.editable && message.text.length <= MAX_IPC_MESSAGE_TEXT_CHARS,
+      })),
+    },
     messages: tail(thread.messages, MAX_IPC_THREAD_MESSAGES).map((message) => ({
       ...message,
       text: truncateText(message.text, MAX_IPC_MESSAGE_TEXT_CHARS),

@@ -176,6 +176,13 @@ Item {
           }
         }
 
+        QueueCard {
+          visible: root.threadData !== null && root.threadData.queue && (root.threadData.queue.total > 0 || root.threadData.queue.held)
+          width: conversation.availableWidth
+          service: root.service
+          threadData: root.threadData || ({})
+        }
+
         WorkingIndicator {
           width: conversation.availableWidth
           phase: root.threadData ? String(root.threadData.phase) : "idle"
