@@ -56,6 +56,10 @@ Do not mark a release fully interoperable until all of the following pass:
 3. Open an existing thread. Messages load without raw tool activity. Expand a
    changed-files card to inspect its directory tree, then start work in the
    official client and observe incremental assistant output here.
+   Open a long thread and use **Load older messages**. Confirm older messages
+   appear once, the visible message stays in place, and failures can be retried.
+   Keep paging past the first window, then use **Jump to latest** and confirm
+   live replies, approvals, and queued messages still match the official client.
 4. Send a follow-up in the mini client and observe the user message plus
    streamed response in both clients.
 5. Copy a screenshot, press **Ctrl+V** in the thread composer, confirm its

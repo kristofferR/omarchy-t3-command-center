@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import * as Schema from "effect/Schema";
-import { OrchestrationV2Run, OrchestrationV2Command, MessageId } from "@t3tools/contracts";
+import * as Stream from "effect/Stream";
+import * as Effect from "effect/Effect";
+import { ORCHESTRATION_V2_WS_METHODS, OrchestrationV2Run, OrchestrationV2Command, MessageId } from "@t3tools/contracts";
 import { T3Commands } from "../bridge/src/t3/commands.ts";
 import { T3EnvironmentSession } from "../bridge/src/t3/session.ts";
 import { T3Projection } from "../bridge/src/t3/projection.ts";
+import type { ThreadDto } from "../bridge/src/protocol/types.ts";
 import { decodeRequestLine } from "../bridge/src/protocol/decode.ts";
 import { config, v2Now, v2ThreadShell, v2Projection, v2ShellSnapshot, message, itemBase, projectedItem } from "./fixtures/t3.ts";
 
@@ -80,4 +83,51 @@ test("queue requests require scope, run identity, and nonempty edit text", () =>
   assert.throws(() => decode("thread.queue.cancel", scope), /runId/);
   assert.throws(() => decode("thread.queue.edit", { ...scope, runId: "run", text: " " }), /text/);
   assert.equal(decode("thread.queue.edit", { ...scope, runId: "run", text: "Changed" }).type, "thread.queue.edit");
+});
+
+test("jump to latest keeps queue controls usable until the replacement snapshot arrives", async () => {
+  const snapshot = Promise.withResolvers<void>();
+  const received = Promise.withResolvers<ThreadDto>();
+  let subscriptions = 0;
+  const session = new T3EnvironmentSession({ onInbox() {}, onThread(dto) {
+    if (dto.queue.total === 0) received.resolve(dto);
+  }, onMessageDelta() {}, onMessageCompleted() {}, onApproval() {}, onInput() {}, onClosed() {}, onError() {} });
+  Object.assign(session, { environmentId: "environment-1", session: { client: {
+    [ORCHESTRATION_V2_WS_METHODS.subscribeThread]() {
+      if (++subscriptions === 1) return Stream.never;
+      return Stream.concat(Stream.fromEffect(Effect.promise(async () => {
+        await snapshot.promise;
+        return { kind: "snapshot" as const, snapshotSequence: 2, projection: v2Projection,
+          historyCursor: "replacement-cursor", hasMoreHistory: true };
+      })), Stream.never);
+    },
+  } } });
+  session.projection.config = config;
+  session.projection.shell = v2ShellSnapshot;
+  const dispatched: OrchestrationV2Command[] = [];
+  session.dispatch = async (value) => {
+    dispatched.push(Schema.decodeUnknownSync(OrchestrationV2Command)(value));
+    return { sequence: dispatched.length };
+  };
+  const commands = new T3Commands(() => session);
+  const payload = { environmentId: "environment-1", threadId: v2ThreadShell.id, runId: "queued-run", text: "Updated" };
+  try {
+    await session.openThread(v2ThreadShell.id);
+    session.projection.applyThread({ kind: "snapshot", snapshotSequence: 1, projection: queuedProjection(),
+      historyCursor: "original-cursor", hasMoreHistory: true });
+    const historyRequest = session.projection.history.begin(session.projection.thread!)!;
+    await session.showLatest(v2ThreadShell.id);
+    assert.equal(session.projection.history.fail(historyRequest, "Stale failure"), false);
+    await commands.manageQueue(payload, "resume");
+    await commands.manageQueue(payload, "edit");
+    await commands.manageQueue(payload, "cancel");
+    assert.deepEqual(dispatched.map((entry) => entry.type), ["queue.resume", "queued-run.edit", "queued-run.cancel"]);
+    snapshot.resolve();
+    assert.equal((await received.promise).queue.total, 0);
+    assert.equal(session.projection.history.begin(session.projection.thread!)?.cursor, "replacement-cursor");
+    await assert.rejects(commands.manageQueue(payload, "cancel"), /no longer queued/);
+  } finally {
+    snapshot.resolve();
+    await session.close();
+  }
 });

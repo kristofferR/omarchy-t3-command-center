@@ -149,6 +149,16 @@ Every lifecycle control is capability-gated for presentation and checked again
 in the bridge before dispatch. No settle, snooze, or pin is represented by a
 local flag.
 
+Long threads open through upstream's authenticated bounded HTTP snapshot when
+available, then resume socket events from that snapshot's sequence. The socket
+snapshot remains the fallback. Older pages use upstream HTTP authorization and
+history merge helpers; cursor requests are invalidated on snapshot replacement,
+thread close, or reconnect. History is a separate window of at most 64 messages,
+with up to 200 pending page messages. Paging moves backwards through that window;
+Jump to latest refreshes the snapshot and resumes live updates. The live
+projection continues to own queue, approval, input, and lifecycle state while
+older history is displayed.
+
 ## Packaging
 
 The public repository root is itself the single supported Omarchy plugin:

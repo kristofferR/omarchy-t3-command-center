@@ -206,6 +206,7 @@ export interface ThreadDto {
   capabilities: CapabilitiesDto;
   messages: MessageDto[];
   queue: ThreadQueueDto;
+  history: { hasMore: boolean; browsing: boolean; loading: boolean; error: string | null };
   diffs: TurnDiffSummaryDto[];
   approvals: ApprovalDto[];
   inputs: InputRequestDto[];
@@ -240,6 +241,8 @@ export type RequestType =
   | "attachment.discard"
   | "thread.open"
   | "thread.close"
+  | "thread.history.load"
+  | "thread.history.latest"
   | "thread.create"
   | "thread.send"
   | "thread.interrupt"

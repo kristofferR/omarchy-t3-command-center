@@ -36,6 +36,7 @@ import type {
 import { BridgeError } from "../security/redact.ts";
 import { boundShellSnapshot, boundShellStreamItem, boundThread, MAX_IPC_MESSAGE_TEXT_CHARS, MAX_IPC_QUEUE_MESSAGES } from "./bounds.ts";
 import { derivePendingApprovals, derivePendingInputs } from "./pending.ts";
+import { T3ThreadHistory } from "./history.ts";
 
 function capabilities(config: ServerConfig): CapabilitiesDto {
   const value = config.environment.capabilities;
@@ -190,6 +191,7 @@ function modelOptions(selection: ModelSelection, config: ServerConfig): ThreadDt
 }
 
 export class T3Projection {
+  readonly history = new T3ThreadHistory();
   shell: OrchestrationV2ShellSnapshot | null = null;
   thread: OrchestrationV2ThreadProjection | null = null;
   config: ServerConfig | null = null;
@@ -197,13 +199,24 @@ export class T3Projection {
   private partialTimeline = false;
   private latestLocalTurnOrdinal: number | null = null;
 
+  get currentThreadSequence(): number { return this.threadSequence; }
+
   reset(): void {
+    this.clearThread();
     this.shell = null;
     this.thread = null;
     this.config = null;
     this.threadSequence = -1;
     this.partialTimeline = false;
     this.latestLocalTurnOrdinal = null;
+  }
+
+  clearThread(): void {
+    this.thread = null;
+    this.threadSequence = -1;
+    this.partialTimeline = false;
+    this.latestLocalTurnOrdinal = null;
+    this.history.reset();
   }
 
   applyShell(item: OrchestrationV2ShellStreamItem): boolean {
@@ -233,6 +246,7 @@ export class T3Projection {
       this.threadSequence = item.snapshotSequence;
       this.partialTimeline = item.hasMoreHistory === true;
       this.latestLocalTurnOrdinal = item.latestLocalTurnOrdinal ?? null;
+      this.history.reset(item.historyCursor ?? null, item.hasMoreHistory === true);
       return true;
     }
     if (item.sequence <= this.threadSequence) return false;
@@ -363,7 +377,8 @@ export class T3Projection {
           attachmentCount: entry.attachments.length,
         })),
       },
-      messages: projection.visibleTurnItems.flatMap((row) => {
+      history: this.history.state(projection),
+      messages: this.history.rows(projection).flatMap((row) => {
         const item = row.item;
         if (item.type !== "user_message" && item.type !== "assistant_message") return [];
         return [

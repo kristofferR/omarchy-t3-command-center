@@ -503,6 +503,10 @@ export class T3Commands {
         return this.interrupt(request.payload);
       case "thread.queue.resume":
         return this.manageQueue(request.payload, "resume");
+      case "thread.history.load":
+        return this.session(request.payload).loadEarlier(string(request.payload, "threadId"));
+      case "thread.history.latest":
+        return this.session(request.payload).showLatest(string(request.payload, "threadId"));
       case "thread.queue.cancel":
         return this.manageQueue(request.payload, "cancel");
       case "thread.queue.edit":

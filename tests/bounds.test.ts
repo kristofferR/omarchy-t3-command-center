@@ -179,6 +179,7 @@ test("bounded inbox and thread IPC payloads stay under the NDJSON cap", () => {
     queue: { held: true, canManage: true, total: 30, messages: Array.from({ length: 30 }, (_, index) => ({
       runId: `queued-${index}`, text: huge, editable: true, attachmentCount: 1,
     })) },
+    history: { hasMore: false, browsing: false, loading: false, error: null },
     messages: Array.from({ length: MAX_STORED_THREAD_MESSAGES + 10 }, (_, index) => ({
       id: `message-${index}`,
       role: "assistant",
