@@ -176,6 +176,9 @@ test("bounded inbox and thread IPC payloads stay under the NDJSON cap", () => {
     lifecycle: "active",
     sessionError: null,
     capabilities: inbox.capabilities,
+    queue: { held: true, canManage: true, total: 30, messages: Array.from({ length: 30 }, (_, index) => ({
+      runId: `queued-${index}`, text: huge, editable: true, attachmentCount: 1,
+    })) },
     messages: Array.from({ length: MAX_STORED_THREAD_MESSAGES + 10 }, (_, index) => ({
       id: `message-${index}`,
       role: "assistant",
@@ -192,6 +195,11 @@ test("bounded inbox and thread IPC payloads stay under the NDJSON cap", () => {
   };
 
   assert.ok(fitsIpcPayload(event("inbox.changed", boundInboxDto(inbox))));
+  const boundedQueue = boundThreadDto(thread).queue;
+  assert.equal(boundedQueue.total, 30);
+  assert.equal(boundedQueue.messages.length, 16);
+  assert.equal(boundedQueue.messages[0]?.text.length, 4096);
+  assert.equal(boundedQueue.messages[0]?.editable, false);
   assert.ok(fitsIpcPayload(event("thread.snapshot", boundThreadDto(thread))));
   assert.ok(
     ipcJsonByteLength(event("thread.snapshot", boundThreadDto(thread))) <= MAX_IPC_JSON_BYTES,

@@ -11,6 +11,7 @@ import type { BridgeRequest, CapabilitiesDto } from "../protocol/types.ts";
 import { BridgeError } from "../security/redact.ts";
 import { T3ImageAttachmentStore } from "./attachments.ts";
 import { T3EnvironmentSession } from "./session.ts";
+import { deriveThreadQueueWorkflowState } from "../../../upstream/t3code/packages/client-runtime/src/state/threadWorkflows.ts";
 
 type Payload = Record<string, unknown>;
 
@@ -262,6 +263,35 @@ export class T3Commands {
     });
   }
 
+  async manageQueue(payload: Payload, action: "resume" | "cancel" | "edit"): Promise<{ sequence: number }> {
+    const session = this.session(payload);
+    const threadId = string(payload, "threadId");
+    if (session.projection.config?.environment.orchestrationProtocolVersion !== 2) {
+      throw new BridgeError("CAPABILITY_UNSUPPORTED", "This environment does not support queue controls.");
+    }
+    const projection = session.projection.thread;
+    if (!projection || projection.thread.id !== threadId) {
+      throw new BridgeError("THREAD_NOT_READY", "Open this thread and wait for it to synchronize.", true);
+    }
+    const queue = deriveThreadQueueWorkflowState(projection);
+    if (action === "resume") {
+      if (!queue.isHeld) throw new BridgeError("QUEUE_NOT_HELD", "The queue is no longer paused.");
+      return session.dispatch({ type: "queue.resume", commandId: id(), threadId });
+    }
+    const runId = string(payload, "runId");
+    const queued = queue.queuedRuns.find((entry) => entry.run.id === runId);
+    if (!queued) throw new BridgeError("QUEUED_RUN_NOT_FOUND", "That message is no longer queued.");
+    if (action === "cancel") {
+      return session.dispatch({ type: "queued-run.cancel", commandId: id(), threadId, runId });
+    }
+    const text = string(payload, "text");
+    if (!text.trim()) {
+      throw new BridgeError("EMPTY_MESSAGE", "Enter message text to save this edit.");
+    }
+    // Omit attachments/context so text edits preserve the original message's context.
+    return session.dispatch({ type: "queued-run.edit", commandId: id(), threadId, runId, text });
+  }
+
   async settle(payload: Payload): Promise<{ sequence: number }> {
     const session = this.session(payload);
     capability(session, "settlement");
@@ -471,6 +501,12 @@ export class T3Commands {
         return this.send(request.payload);
       case "thread.interrupt":
         return this.interrupt(request.payload);
+      case "thread.queue.resume":
+        return this.manageQueue(request.payload, "resume");
+      case "thread.queue.cancel":
+        return this.manageQueue(request.payload, "cancel");
+      case "thread.queue.edit":
+        return this.manageQueue(request.payload, "edit");
       case "thread.settle":
         return this.settle(request.payload);
       case "thread.unsettle":

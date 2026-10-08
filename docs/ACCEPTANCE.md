@@ -66,6 +66,10 @@ Do not mark a release fully interoperable until all of the following pass:
    appears in the official client.
 7. While work is running, press **Stop** and confirm the turn is interrupted in
    both clients.
+   Queue a follow-up before stopping. Confirm the queue shows as paused, edit
+   its text without losing attachments, then resume it. Cancel another queued
+   message and confirm both clients agree. Steering messages have a distinct
+   label from messages that are still queued.
 8. Trigger a command/file approval; approve or decline it here and confirm the
    provider resumes or rejects correctly.
 9. Trigger a user-input question; answer it here and confirm the answer reaches
