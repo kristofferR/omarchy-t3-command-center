@@ -9,7 +9,6 @@ import {
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadHistoryPage,
-  type OrchestrationV2ThreadBoundedSnapshot,
   type ServerConfig,
 } from "@t3tools/contracts";
 import {
@@ -35,7 +34,6 @@ import { T3Projection } from "./projection.ts";
 
 type RuntimeFiber = Fiber.Fiber<unknown, unknown>;
 type HistoryPageLoader = (prepared: PreparedConnection, threadId: string, cursor: string) => Promise<OrchestrationV2ThreadHistoryPage>;
-type HistorySnapshotLoader = (prepared: PreparedConnection, threadId: string) => Promise<OrchestrationV2ThreadBoundedSnapshot>;
 
 export interface SessionCallbacks {
   onInbox(inbox: InboxDto): void;
@@ -130,7 +128,7 @@ export class T3EnvironmentSession {
   private prepared: PreparedConnection | null = null;
   private threadGeneration = 0;
 
-  constructor(private readonly callbacks: SessionCallbacks, private readonly loadHistoryPage?: HistoryPageLoader, private readonly loadHistorySnapshot?: HistorySnapshotLoader) {}
+  constructor(private readonly callbacks: SessionCallbacks, private readonly loadHistoryPage?: HistoryPageLoader) {}
 
   private reportUnexpectedClose(code: string, detail: string): void {
     if (this.expectedClose || this.failureReported) return;
@@ -277,27 +275,10 @@ export class T3EnvironmentSession {
       await Effect.runPromise(Fiber.interrupt(previous));
     }
     const client = this.requireClient();
-    let afterSequence: number | undefined;
-    const prepared = this.prepared;
-    if (this.projection.config?.threadSnapshotPagination === true && prepared && this.loadHistorySnapshot) {
-      try {
-        const snapshot = await this.loadHistorySnapshot(prepared, threadId);
-        if (generation !== this.threadGeneration) return;
-        this.projection.applyThread({
-          kind: "snapshot", snapshotSequence: snapshot.snapshotSequence,
-          projection: snapshot.projection, historyCursor: snapshot.historyCursor,
-          hasMoreHistory: snapshot.hasMoreHistory, latestLocalTurnOrdinal: snapshot.latestLocalTurnOrdinal,
-        });
-        afterSequence = snapshot.snapshotSequence;
-        if (this.environmentId !== null) this.callbacks.onThread(this.projection.threadDto(this.environmentId));
-      } catch {
-        // Older servers and transient HTTP failures can still open over the socket.
-      }
-    }
     if (generation !== this.threadGeneration) return;
+    // The socket supplies the bounded window and cursor before live events.
     const stream = client[ORCHESTRATION_V2_WS_METHODS.subscribeThread]({
       threadId: ThreadId.make(threadId),
-      ...(afterSequence === undefined ? {} : { afterSequence }),
       ...(this.projection.config?.threadResumeCompletionMarker === true
         ? { requestCompletionMarker: true as const }
         : {}),
@@ -410,7 +391,7 @@ export class T3EnvironmentSession {
     }
     this.projection.history.latest();
     this.callbacks.onThread(this.projection.threadDto(this.environmentId));
-    // Refresh the window/cursor after long browsing sessions, then catch up from its sequence.
+    // Refresh the window/cursor after long browsing sessions through the socket.
     await this.subscribeThread(threadId);
     return {};
   }

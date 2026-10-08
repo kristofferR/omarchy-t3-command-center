@@ -54,7 +54,6 @@ export class BridgeApp implements NdjsonHandler {
       (hooks) => new T3EnvironmentSession(
         hooks,
         (prepared, threadId, cursor) => relay.loadThreadHistory(prepared, threadId, cursor),
-        (prepared, threadId) => relay.loadThreadSnapshot(prepared, threadId),
       ),
       {
         onThread: (thread) => this.emit("thread.snapshot", thread),

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { setImmediate } from "node:timers/promises";
 import * as Stream from "effect/Stream";
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { ORCHESTRATION_V2_WS_METHODS, OrchestrationV2ThreadBoundedSnapshot, OrchestrationV2ThreadHistoryPage, ThreadId } from "@t3tools/contracts";
 import { T3EnvironmentSession } from "../bridge/src/t3/session.ts";
@@ -179,53 +180,78 @@ test("history pages ahead of the live sequence retain their cursor for retry aft
   assert.equal(cursors.at(-1), "next-cursor");
 });
 
+test("thread opening gets the bounded window and history cursor directly from the socket", async () => {
+  const received = Promise.withResolvers<ThreadDto>();
+  const requests: Array<{ threadId: string; acceptBoundedSnapshot?: boolean; afterSequence?: number }> = [];
+  const bounded = Schema.decodeUnknownSync(OrchestrationV2ThreadBoundedSnapshot)({
+    snapshotSequence: 1, projection: projection(), historyCursor: "socket-cursor",
+    hasMoreHistory: true, latestLocalTurnOrdinal: null,
+  });
+  const cursors: string[] = [];
+  const session = new T3EnvironmentSession({ onInbox() {}, onThread(dto) { received.resolve(dto); },
+    onMessageDelta() {}, onMessageCompleted() {}, onApproval() {}, onInput() {}, onClosed() {}, onError() {} },
+    async (_prepared, _threadId, cursor) => { cursors.push(cursor); return page("older"); });
+  Object.assign(session, { environmentId: "environment-1", prepared: {}, session: { client: {
+    [ORCHESTRATION_V2_WS_METHODS.subscribeThread](input: (typeof requests)[number]) {
+      requests.push(input);
+      return Stream.concat(Stream.make({ kind: "snapshot" as const, ...bounded }), Stream.never);
+    },
+  } } });
+  session.projection.config = config;
+  session.projection.shell = v2ShellSnapshot;
+  try {
+    await session.openThread(v2Projection.thread.id);
+    const dto = await received.promise;
+    assert.equal(dto.history.hasMore, true);
+    assert.deepEqual(requests, [{ threadId: v2Projection.thread.id, acceptBoundedSnapshot: true }]);
+    assert.deepEqual(await session.loadEarlier(v2Projection.thread.id), { loaded: true });
+    assert.deepEqual(cursors, ["socket-cursor"]);
+  } finally {
+    await session.close();
+  }
+});
+
 test("a stale jump-to-latest refresh cannot let shell updates duplicate a newer thread subscription", async () => {
-  const refreshing = Promise.withResolvers<OrchestrationV2ThreadBoundedSnapshot>();
-  const opening = Promise.withResolvers<OrchestrationV2ThreadBoundedSnapshot>();
+  const interrupting = Promise.withResolvers<void>();
+  const interrupted = Promise.withResolvers<void>();
   const inbox = Promise.withResolvers<void>();
-  const snapshotRequests: string[] = [];
   const streamRequests: string[] = [];
   const nextId = ThreadId.make("next-thread");
   const session = new T3EnvironmentSession({ onInbox() { inbox.resolve(); }, onThread() {},
-    onMessageDelta() {}, onMessageCompleted() {}, onApproval() {}, onInput() {}, onClosed() {}, onError() {} },
-    undefined, async (_prepared, threadId) => {
-      snapshotRequests.push(threadId);
-      return threadId === nextId ? opening.promise : refreshing.promise;
-    });
+    onMessageDelta() {}, onMessageCompleted() {}, onApproval() {}, onInput() {}, onClosed() {}, onError() {} });
   Object.assign(session, { environmentId: "environment-1", prepared: {}, session: { client: {
     [ORCHESTRATION_V2_WS_METHODS.subscribeShell]() {
       return Stream.concat(Stream.make({ kind: "snapshot" as const, snapshot: v2ShellSnapshot }), Stream.never);
     },
     [ORCHESTRATION_V2_WS_METHODS.subscribeThread]({ threadId }: { threadId: string }) {
       streamRequests.push(threadId);
-      return Stream.never;
+      return threadId === nextId ? Stream.never : Stream.never.pipe(Stream.ensuring(Effect.promise(() => {
+        interrupting.resolve();
+        return interrupted.promise;
+      })));
     },
   } } });
   session.projection.config = config;
   session.projection.shell = v2ShellSnapshot;
-  session.projection.applyThread({ kind: "snapshot", snapshotSequence: 1, projection: projection(), historyCursor: "cursor", hasMoreHistory: true });
-  const bounded = (threadId: ThreadId) => Schema.decodeUnknownSync(OrchestrationV2ThreadBoundedSnapshot)({
-    snapshotSequence: 1, projection: { ...projection(), thread: { ...v2Projection.thread, id: threadId } },
-    historyCursor: "cursor", hasMoreHistory: true, latestLocalTurnOrdinal: null,
-  });
 
   try {
+    // A socket without an initial item must not keep openThread pending.
+    await session.openThread(v2Projection.thread.id);
+    await setImmediate();
+    session.projection.applyThread({ kind: "snapshot", snapshotSequence: 1, projection: projection(), historyCursor: "cursor", hasMoreHistory: true });
     const refresh = session.showLatest(v2Projection.thread.id);
-    const open = session.openThread(nextId);
-    refreshing.resolve(bounded(v2Projection.thread.id));
+    await interrupting.promise;
+    await session.openThread(nextId);
+    interrupted.resolve();
     await refresh;
-    // Deliver a shell update while the newer bounded snapshot is still pending.
+    // Deliver a shell update while the newer socket snapshot is still pending.
     (session as unknown as { startShellStream(): void }).startShellStream();
     await inbox.promise;
     await setImmediate();
-    assert.deepEqual(snapshotRequests, [v2Projection.thread.id, nextId]);
-    assert.deepEqual(streamRequests, []);
-
-    opening.resolve(bounded(nextId));
-    await open;
-    assert.deepEqual(streamRequests, [nextId]);
-    assert.equal(session.projection.thread?.thread.id, nextId);
+    assert.deepEqual(streamRequests, [v2Projection.thread.id, nextId]);
+    assert.equal(session.projection.thread, null);
   } finally {
+    interrupted.resolve();
     await session.close();
   }
 });

@@ -144,12 +144,14 @@ for (const historyType of ["thread.history.load", "thread.history.latest"]) {
     assert.equal(responses.length, requests.length, stderr);
     assert(responses.every((message) => message.ok), JSON.stringify(responses));
     assert.deepEqual(responses.map((message) => message.requestId), [
-      "open", ...(historyType === "thread.history.load" ? ["duplicate"] : []), "interrupt", "approval", "input", "send", "close", "history",
+      "open", ...(historyType === "thread.history.load" ? ["duplicate"] : ["history"]),
+      "interrupt", "approval", "input", "send", "close", ...(historyType === "thread.history.load" ? ["history"] : []),
     ]);
     assert.deepEqual(responses.filter((message) => message.ok && ["interrupt", "approval", "input", "send"].includes(message.requestId)).map((message) => message.ok && message.payload), [
       { sequence: 1 }, { sequence: 2 }, { sequence: 3 }, { sequence: 4 },
     ]);
-    assert.deepEqual(responses.at(-1)?.ok && responses.at(-1)?.payload, historyType === "thread.history.load" ? { loaded: false } : {});
+    const historyResponse = responses.find((message) => message.requestId === "history");
+    assert.deepEqual(historyResponse?.ok && historyResponse.payload, historyType === "thread.history.load" ? { loaded: false } : {});
     assert.equal(messages.filter((message) => message.type === "event" && message.event === "thread.snapshot").length, historyType === "thread.history.load" ? 2 : 1);
     const exit = once(child, "exit");
     child.stdin.end();

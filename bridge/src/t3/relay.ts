@@ -16,7 +16,6 @@ import { FetchHttpClient } from "effect/http";
 
 import * as UpstreamRemoteAuthorization from "../../../upstream/t3code/packages/client-runtime/src/authorization/service.ts";
 import { fetchEnvironmentThreadHistoryPage } from "../../../upstream/t3code/packages/client-runtime/src/state/threadHistoryHttp.ts";
-import { fetchEnvironmentBoundedThreadSnapshot } from "../../../upstream/t3code/packages/client-runtime/src/state/boundedThreadSnapshotHttp.ts";
 import packageMetadata from "../../../package.json" with { type: "json" };
 
 import type { AuthProvider } from "../auth/provider.ts";
@@ -207,16 +206,6 @@ export class T3RelayClient {
       const signer = yield* ManagedRelay.ManagedRelayDpopSigner;
       return yield* fetchEnvironmentThreadHistoryPage({
         prepared, threadId: ThreadId.make(threadId), cursor, signer: Option.some(signer), remoteAuthorization,
-      });
-    }).pipe(Effect.provide(this.keys.signerLayer()), Effect.provide(FetchHttpClient.layer)));
-  }
-
-  async loadThreadSnapshot(prepared: PreparedConnection, threadId: string) {
-    const remoteAuthorization = Option.some(await this.remoteAuthorization());
-    return Effect.runPromise(Effect.gen(function* () {
-      const signer = yield* ManagedRelay.ManagedRelayDpopSigner;
-      return yield* fetchEnvironmentBoundedThreadSnapshot({
-        prepared, threadId: ThreadId.make(threadId), signer: Option.some(signer), remoteAuthorization,
       });
     }).pipe(Effect.provide(this.keys.signerLayer()), Effect.provide(FetchHttpClient.layer)));
   }
