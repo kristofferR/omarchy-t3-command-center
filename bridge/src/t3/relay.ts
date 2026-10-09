@@ -15,6 +15,7 @@ import * as Option from "effect/Option";
 import { FetchHttpClient } from "effect/http";
 
 import * as UpstreamRemoteAuthorization from "../../../upstream/t3code/packages/client-runtime/src/authorization/service.ts";
+import { appendOrchestrationProtocol } from "../../../upstream/t3code/packages/client-runtime/src/connection/compatibility.ts";
 import { fetchEnvironmentThreadHistoryPage } from "../../../upstream/t3code/packages/client-runtime/src/state/threadHistoryHttp.ts";
 import packageMetadata from "../../../package.json" with { type: "json" };
 
@@ -186,7 +187,7 @@ export class T3RelayClient {
         environmentId: authorized.environmentId,
         label: authorized.label,
         httpBaseUrl: authorized.httpBaseUrl,
-        socketUrl: authorized.socketUrl,
+        socketUrl: appendOrchestrationProtocol(authorized.socketUrl),
         httpAuthorization: authorized.httpAuthorization,
         target: {
           _tag: "RelayConnectionTarget",

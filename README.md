@@ -62,7 +62,7 @@ you to Inbox.
 - A T3 account with at least one linked environment reachable through Relay
 - Omarchy 4.0+ (x86-64) with Quickshell plugins and `wl-paste`
 - Secret Service + `secret-tool`
-- `xdg-open`, `xdg-mime`, `gzip`, `sha256sum`, graphical browser
+- `xdg-open`, `xdg-mime`, `gio` (GLib), `gzip`, `sha256sum`, graphical browser
 
 Other Linux arches can build a native bridge from source.
 
