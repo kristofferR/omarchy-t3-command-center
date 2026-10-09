@@ -3,6 +3,8 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 import { forwardNativeCallback } from "../bridge/src/auth/nativeCallback.ts";
 import { DEFAULT_NATIVE_CLERK_CONFIG, NativeClerkProvider } from "../bridge/src/auth/nativeProvider.ts";
@@ -575,4 +577,26 @@ test("Secret Service store reads and clears values for the current application",
   assert.equal(values.get(`${application}:t3-connect-clerk-client`), "saved-client-token");
   await store.remove("t3-connect-clerk-client");
   assert.equal(values.size, 0);
+});
+
+// Exercise the real desktop registry in a child so the user's MIME settings stay untouched.
+test("native callback routing replaces and restores a quoted desktop owner through GIO", async () => {
+  const root = await mkdtemp(join(tmpdir(), "t3-callback-gio-"));
+  try {
+    const result = spawnSync(process.execPath, ["--import", "tsx", fileURLToPath(new URL("./fixtures/callback-routing.ts", import.meta.url))], {
+      encoding: "utf8",
+      timeout: 30_000,
+      env: {
+        ...process.env,
+        XDG_CONFIG_HOME: join(root, "config"), XDG_DATA_HOME: join(root, "data"),
+        XDG_CONFIG_DIRS: join(root, "system-config"), XDG_DATA_DIRS: join(root, "system-data"),
+        XDG_CURRENT_DESKTOP: "Hyprland", LC_ALL: "C",
+      },
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /T3_CALLBACK_ROUTING_OK/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
