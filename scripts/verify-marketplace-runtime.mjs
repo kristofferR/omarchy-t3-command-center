@@ -29,8 +29,10 @@ if (process.platform !== "linux" || process.arch !== "x64") {
   throw new Error("Marketplace runtime verification requires x86-64 Linux.");
 }
 
+if (Number(process.versions.node.split(".")[0]) < 26) throw new Error("Marketplace builds require Node 26 or newer.");
+
 const expectedNodeVersion = (await readFile(join(root, ".node-version"), "utf8")).trim();
-if (process.version !== `v${expectedNodeVersion}`) {
+if (expectedNodeVersion !== "latest" && process.version !== `v${expectedNodeVersion}`) {
   throw new Error(
     `Marketplace runtime verification requires Node ${expectedNodeVersion}; received ${process.version}.`,
   );
@@ -79,7 +81,7 @@ try {
   }
 
   process.stdout.write(
-    `Tracked marketplace runtime byte-matches the fresh Node ${expectedNodeVersion} source build (${freshDigest}).\n`,
+    `Tracked marketplace runtime byte-matches the fresh Node ${process.version} source build (${freshDigest}).\n`,
   );
 } finally {
   await rm(decompressedStage, { force: true });

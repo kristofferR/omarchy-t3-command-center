@@ -34,23 +34,23 @@ copy under the registry-ignored `.backups/` directory.
 
 ## Marketplace runtime provenance
 
-The marketplace executable must be produced on Linux x64 with the official
-Node version pinned in `.node-version` and the pnpm version pinned by
-`packageManager`. `scripts/package.mjs` uses repository-relative SEA input
+The marketplace executable must be produced on Linux x64. `.node-version`
+follows the latest Node release; the license inventory records the builder used.
+`scripts/package.mjs` uses repository-relative SEA input
 paths so checkout location does not affect the executable. After a source
 build, `pnpm verify:marketplace-runtime` decompresses the tracked payload
 without executing it and fails unless it byte-matches `dist/t3-mini-bridge`
 and both share the tracked SHA-256.
 
-To deliberately refresh the payload, use the pinned builder and run:
+To deliberately refresh the payload, use the current Node builder and run:
 
 ```bash
 pnpm package
 pnpm bundle:marketplace
 ```
 
-Review the binary and checksum changes together. CI repeats a fresh build with
-the official pinned Node distribution and enforces the same byte comparison;
+Review the binary and checksum changes together. CI checks the code with the
+latest Node release and reproduces the recorded payload builder for the byte comparison;
 the executable self-test is only a functional metadata check, not the
 provenance proof.
 
