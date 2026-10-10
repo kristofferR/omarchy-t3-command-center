@@ -56,6 +56,10 @@ Do not mark a release fully interoperable until all of the following pass:
 3. Open an existing thread. Messages load without raw tool activity. Expand a
    changed-files card to inspect its directory tree, then start work in the
    official client and observe incremental assistant output here.
+   Open a long thread and use **Load older messages**. Confirm older messages
+   appear once, the visible message stays in place, and failures can be retried.
+   Keep paging past the first window, then use **Jump to latest** and confirm
+   live replies, approvals, and queued messages still match the official client.
 4. Send a follow-up in the mini client and observe the user message plus
    streamed response in both clients.
 5. Copy a screenshot, press **Ctrl+V** in the thread composer, confirm its
@@ -66,6 +70,10 @@ Do not mark a release fully interoperable until all of the following pass:
    appears in the official client.
 7. While work is running, press **Stop** and confirm the turn is interrupted in
    both clients.
+   Queue a follow-up before stopping. Confirm the queue shows as paused, edit
+   its text without losing attachments, then resume it. Cancel another queued
+   message and confirm both clients agree. Steering messages have a distinct
+   label from messages that are still queued.
 8. Trigger a command/file approval; approve or decline it here and confirm the
    provider resumes or rejects correctly.
 9. Trigger a user-input question; answer it here and confirm the answer reaches

@@ -7,7 +7,7 @@ import { ClientCapabilities } from "@t3tools/client-runtime/platform";
 import * as Scope from "effect/Scope";
 import * as Exit from "effect/Exit";
 import { ManagedRelay } from "@t3tools/client-runtime/relay";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { RelayWebClientId, type RelayClientEnvironmentRecord } from "@t3tools/contracts/relay";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -15,6 +15,8 @@ import * as Option from "effect/Option";
 import { FetchHttpClient } from "effect/http";
 
 import * as UpstreamRemoteAuthorization from "../../../upstream/t3code/packages/client-runtime/src/authorization/service.ts";
+import { appendOrchestrationProtocol } from "../../../upstream/t3code/packages/client-runtime/src/connection/compatibility.ts";
+import { fetchEnvironmentThreadHistoryPage } from "../../../upstream/t3code/packages/client-runtime/src/state/threadHistoryHttp.ts";
 import packageMetadata from "../../../package.json" with { type: "json" };
 
 import type { AuthProvider } from "../auth/provider.ts";
@@ -185,7 +187,7 @@ export class T3RelayClient {
         environmentId: authorized.environmentId,
         label: authorized.label,
         httpBaseUrl: authorized.httpBaseUrl,
-        socketUrl: authorized.socketUrl,
+        socketUrl: appendOrchestrationProtocol(authorized.socketUrl),
         httpAuthorization: authorized.httpAuthorization,
         target: {
           _tag: "RelayConnectionTarget",
@@ -199,6 +201,16 @@ export class T3RelayClient {
       throw new BridgeError("ENVIRONMENT_CONNECT_FAILED", detail, !blocked);
     }
   }
+  async loadThreadHistory(prepared: PreparedConnection, threadId: string, cursor: string) {
+    const remoteAuthorization = Option.some(await this.remoteAuthorization());
+    return Effect.runPromise(Effect.gen(function* () {
+      const signer = yield* ManagedRelay.ManagedRelayDpopSigner;
+      return yield* fetchEnvironmentThreadHistoryPage({
+        prepared, threadId: ThreadId.make(threadId), cursor, signer: Option.some(signer), remoteAuthorization,
+      });
+    }).pipe(Effect.provide(this.keys.signerLayer()), Effect.provide(FetchHttpClient.layer)));
+  }
+
   async close(): Promise<void> {
     const pending = this.remote;
     this.remote = null;

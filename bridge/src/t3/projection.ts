@@ -23,6 +23,7 @@ import {
   threadRuntimeIsActive,
 } from "../../../upstream/t3code/packages/client-runtime/src/state/models.ts";
 import { deriveThreadCheckpointSummaries } from "../../../upstream/t3code/packages/client-runtime/src/state/threadCheckpoints.ts";
+import { deriveThreadQueueWorkflowState } from "../../../upstream/t3code/packages/client-runtime/src/state/threadWorkflows.ts";
 import type {
   CapabilitiesDto,
   InboxDto,
@@ -33,8 +34,9 @@ import type {
   ThreadSummaryDto,
 } from "../protocol/types.ts";
 import { BridgeError } from "../security/redact.ts";
-import { boundShellSnapshot, boundShellStreamItem, boundThread } from "./bounds.ts";
+import { boundShellSnapshot, boundShellStreamItem, boundThread, MAX_IPC_MESSAGE_TEXT_CHARS, MAX_IPC_QUEUE_MESSAGES } from "./bounds.ts";
 import { derivePendingApprovals, derivePendingInputs } from "./pending.ts";
+import { T3ThreadHistory } from "./history.ts";
 
 function capabilities(config: ServerConfig): CapabilitiesDto {
   const value = config.environment.capabilities;
@@ -189,6 +191,7 @@ function modelOptions(selection: ModelSelection, config: ServerConfig): ThreadDt
 }
 
 export class T3Projection {
+  readonly history = new T3ThreadHistory();
   shell: OrchestrationV2ShellSnapshot | null = null;
   thread: OrchestrationV2ThreadProjection | null = null;
   config: ServerConfig | null = null;
@@ -196,13 +199,24 @@ export class T3Projection {
   private partialTimeline = false;
   private latestLocalTurnOrdinal: number | null = null;
 
+  get currentThreadSequence(): number { return this.threadSequence; }
+
   reset(): void {
+    this.clearThread();
     this.shell = null;
     this.thread = null;
     this.config = null;
     this.threadSequence = -1;
     this.partialTimeline = false;
     this.latestLocalTurnOrdinal = null;
+  }
+
+  clearThread(): void {
+    this.thread = null;
+    this.threadSequence = -1;
+    this.partialTimeline = false;
+    this.latestLocalTurnOrdinal = null;
+    this.history.reset();
   }
 
   applyShell(item: OrchestrationV2ShellStreamItem): boolean {
@@ -232,6 +246,7 @@ export class T3Projection {
       this.threadSequence = item.snapshotSequence;
       this.partialTimeline = item.hasMoreHistory === true;
       this.latestLocalTurnOrdinal = item.latestLocalTurnOrdinal ?? null;
+      this.history.reset(item.historyCursor ?? null, item.hasMoreHistory === true);
       return true;
     }
     if (item.sequence <= this.threadSequence) return false;
@@ -322,6 +337,9 @@ export class T3Projection {
       shellFromDetail(projection);
     const presented = presentThreadShell(EnvironmentId.make(environmentId), shell);
     const phase = phaseOf(presented);
+    const queue = deriveThreadQueueWorkflowState(projection);
+    const queuedMessageIds = new Set(queue.queuedRuns.map((entry) => entry.messageId));
+    const availableMessageIds = new Set(projection.messages.map((message) => message.id));
     const project = snapshot.projects.find((project) => project.id === shell.projectId);
     return {
       environmentId,
@@ -348,7 +366,19 @@ export class T3Projection {
       lifecycle: lifecycleOf(shell, config),
       sessionError: presented.runtime?.lastError ?? null,
       capabilities: capabilities(config),
-      messages: projection.visibleTurnItems.flatMap((row) => {
+      queue: {
+        held: queue.isHeld,
+        canManage: config.environment.orchestrationProtocolVersion === 2,
+        total: queue.queuedRuns.length,
+        messages: queue.queuedRuns.slice(0, MAX_IPC_QUEUE_MESSAGES).map((entry) => ({
+          runId: entry.run.id,
+          text: entry.text.slice(0, MAX_IPC_MESSAGE_TEXT_CHARS),
+          editable: availableMessageIds.has(entry.messageId) && entry.text.length <= MAX_IPC_MESSAGE_TEXT_CHARS,
+          attachmentCount: entry.attachments.length,
+        })),
+      },
+      history: this.history.state(projection),
+      messages: this.history.rows(projection).flatMap((row) => {
         const item = row.item;
         if (item.type !== "user_message" && item.type !== "assistant_message") return [];
         return [
@@ -365,6 +395,11 @@ export class T3Projection {
               mimeType: attachment.mimeType,
               sizeBytes: attachment.sizeBytes,
             })),
+            ...(item.type === "user_message" && queuedMessageIds.has(item.messageId)
+              ? { delivery: "queued" as const }
+              : item.type === "user_message" && ["steer", "promoted_queued_to_steer"].includes(item.inputIntent)
+                ? { delivery: "steer" as const }
+                : {}),
           },
         ];
       }),
